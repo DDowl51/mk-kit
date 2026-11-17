@@ -1,0 +1,25 @@
+[package]
+name = "screenshot-niri"
+description = "系统服务：用 niri 截窗口，提供 Screenshots。"
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[package.metadata.component]
+id = "screenshot-niri"
+
+[dependencies]
+kernel-api.workspace = true
+screenshot-contract.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["process", "io-util", "fs"] }
+
+[dev-dependencies]
+screenshot-contract = { workspace = true, features = ["testing"] }
+testkit.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

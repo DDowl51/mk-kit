@@ -9,6 +9,9 @@ use serde_json::json;
 
 use super::*;
 
+/// 一个一个跑：一个测试写脚本时另一个测试 fork 出的子进程会带着写句柄，exec 时报「Text file busy」。
+static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// 写一个假 vicinae：把参数逐行写进 `<脚本>.args`、stdin 写进 `<脚本>.stdin`，然后执行 `body`。
 fn fake(dir: &Path, name: &str, body: &str) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
@@ -38,6 +41,7 @@ fn body(scenario: &Scenario) -> String {
 
 #[tokio::test]
 async fn passes_the_prompt_contract() {
+    let _serial = SERIAL.lock().await;
     let dir = tempfile::tempdir().unwrap();
     let n = AtomicUsize::new(0);
     prompt_contract(|scenario| {
@@ -50,6 +54,7 @@ async fn passes_the_prompt_contract() {
 
 #[tokio::test]
 async fn arguments_and_an_empty_list() {
+    let _serial = SERIAL.lock().await;
     let dir = tempfile::tempdir().unwrap();
     let script = fake(dir.path(), "vicinae", "printf 'x\\n'");
     let prompt = Vicinae(Config {
@@ -85,6 +90,7 @@ async fn arguments_and_an_empty_list() {
 
 #[tokio::test]
 async fn no_initial_text_means_no_query_argument() {
+    let _serial = SERIAL.lock().await;
     let dir = tempfile::tempdir().unwrap();
     let script = fake(dir.path(), "vicinae", "exit 1");
     vicinae(&script)
@@ -97,6 +103,7 @@ async fn no_initial_text_means_no_query_argument() {
 
 #[tokio::test]
 async fn a_crash_or_a_missing_program_is_unavailable() {
+    let _serial = SERIAL.lock().await;
     let dir = tempfile::tempdir().unwrap();
     let script = fake(dir.path(), "vicinae", "echo 'no display' >&2; exit 3");
     let err = vicinae(&script)
@@ -118,6 +125,7 @@ async fn a_crash_or_a_missing_program_is_unavailable() {
 
 #[tokio::test]
 async fn config_is_checked_at_startup() {
+    let _serial = SERIAL.lock().await;
     let err = testkit::app()
         .with(PromptVicinae)
         .config("prompt-vicinae", json!({ "command": " " }))
