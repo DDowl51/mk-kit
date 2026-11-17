@@ -14,7 +14,7 @@ kernel-api.workspace = true
 tui-contract.workspace = true
 ratatui.workspace = true
 serde.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["process"] }
 unicode-width.workspace = true
 
 [dev-dependencies]
