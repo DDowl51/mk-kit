@@ -22,6 +22,7 @@ log-contract = { path = "contracts/log" }
 sql-contract = { path = "contracts/sql" }
 timer-contract = { path = "contracts/timer" }
 tui-contract = { path = "contracts/tui" }
+prompt-contract = { path = "contracts/prompt" }
 window-contract = { path = "contracts/window" }
 
 

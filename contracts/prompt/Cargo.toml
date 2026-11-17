@@ -1,0 +1,20 @@
+[package]
+name = "prompt-contract"
+description = "契约：弹一个输入框，要一行文字。"
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[features]
+testing = []
+
+[dependencies]
+kernel-api.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+
+[lints]
+workspace = true

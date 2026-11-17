@@ -1337,6 +1337,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "prompt-contract"
+version = "0.1.0"
+dependencies = [
+ "kernel-api",
+ "serde",
+ "tokio",
+]
+
+[[package]]
+name = "prompt-vicinae"
+version = "0.1.0"
+dependencies = [
+ "kernel-api",
+ "prompt-contract",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "testkit",
+ "tokio",
+]
+
+[[package]]
 name = "psm"
 version = "0.1.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"

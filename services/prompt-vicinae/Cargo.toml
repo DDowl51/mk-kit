@@ -1,0 +1,25 @@
+[package]
+name = "prompt-vicinae"
+description = "系统服务：用 vicinae dmenu 弹输入框，提供 Prompt。"
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[package.metadata.component]
+id = "prompt-vicinae"
+
+[dependencies]
+kernel-api.workspace = true
+prompt-contract.workspace = true
+serde.workspace = true
+tokio = { workspace = true, features = ["process", "io-util"] }
+
+[dev-dependencies]
+prompt-contract = { workspace = true, features = ["testing"] }
+serde_json.workspace = true
+tempfile.workspace = true
+testkit.workspace = true
+
+[lints]
+workspace = true
