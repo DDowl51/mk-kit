@@ -12,6 +12,7 @@ publish = false
 [workspace.dependencies]
 kernel-api = { path = "crates/kernel-api" }
 kernel = { path = "crates/kernel" }
+boot = { path = "crates/boot" }
 testkit = { path = "crates/testkit" }
 
 browser-contract = { path = "contracts/browser" }
