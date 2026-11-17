@@ -23,6 +23,7 @@ log-contract = { path = "contracts/log" }
 sql-contract = { path = "contracts/sql" }
 timer-contract = { path = "contracts/timer" }
 tui-contract = { path = "contracts/tui" }
+notify-contract = { path = "contracts/notify" }
 process-contract = { path = "contracts/process" }
 prompt-contract = { path = "contracts/prompt" }
 screenshot-contract = { path = "contracts/screenshot" }
@@ -45,6 +46,7 @@ thiserror = "2"
 tokio = { version = "1", features = ["rt", "macros", "sync", "time"] }
 tokio-util = "0.7"
 toml = "1.1"
+zbus = { version = "5", default-features = false, features = ["tokio"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
