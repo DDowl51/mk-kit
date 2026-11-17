@@ -46,6 +46,19 @@ pub struct Settings {
     sections: HashMap<String, Map<String, Value>>,
 }
 
+/// 应用的数据目录：`$XDG_DATA_HOME/<app>` → `~/.local/share/<app>`。
+///
+/// 系统服务不知道自己被哪个应用用，所以「数据默认放哪」由启动器用它算出来，
+/// 再用 [`Settings::set_default`] 交给存储之类的系统服务。
+pub fn data_dir(app: &str) -> PathBuf {
+    std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(app)
+}
+
 /// 配置文件在哪：`$<APP>_CONFIG` → `$XDG_CONFIG_HOME/<app>/config.toml` → `~/.config/<app>/config.toml`。
 pub fn config_path(app: &str) -> PathBuf {
     let var = format!("{}_CONFIG", app.to_uppercase().replace('-', "_"));
@@ -101,6 +114,17 @@ impl Settings {
             .entry(component.to_owned())
             .or_default()
             .insert(key.to_owned(), value);
+    }
+
+    /// 启动器给一个键定默认值：配置文件里没写这个键时才生效，写了就以配置文件为准。
+    ///
+    /// 用来把应用相关的默认值（数据库放在哪）交给不认识应用的系统服务。
+    pub fn set_default(&mut self, component: &str, key: &str, value: Value) {
+        self.sections
+            .entry(component.to_owned())
+            .or_default()
+            .entry(key.to_owned())
+            .or_insert(value);
     }
 
     /// 整理成交给 kernel 的配置。
@@ -178,6 +202,22 @@ fn resolve_cmds(map: &mut Map<String, Value>) -> Result<(), AppError> {
 mod tests {
     use kernel_api::ErrorKind;
     use serde_json::json;
+
+    #[test]
+    fn set_default_only_fills_what_the_file_left_out() {
+        let mut settings =
+            Settings::parse("[components.storage-sqlite]\npath = \"/mine.db\"\n").unwrap();
+        settings.set_default("storage-sqlite", "path", json!("/default.db"));
+        settings.set_default("storage-sqlite", "busy_timeout_ms", json!(10));
+        settings.set_default("files-std", "root", json!("/data"));
+        let configs = settings
+            .for_process(&["storage-sqlite", "files-std"], &[])
+            .unwrap();
+        let sqlite = configs["storage-sqlite"].as_map();
+        assert_eq!(sqlite["path"], json!("/mine.db"));
+        assert_eq!(sqlite["busy_timeout_ms"], json!(10));
+        assert_eq!(configs["files-std"].as_map()["root"], json!("/data"));
+    }
 
     use super::*;
 

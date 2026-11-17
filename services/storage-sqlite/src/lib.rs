@@ -20,7 +20,7 @@ use crate::db::Db;
 #[serde(deny_unknown_fields, default)]
 struct Config {
     /// 数据库文件。`:memory:` 是内存数据库。
-    /// 不写时用 `$XDG_DATA_HOME/lifelog/lifelog.db`（通常是 `~/.local/share/lifelog/lifelog.db`）。
+    /// 必须有：这个服务不知道自己被哪个应用用，默认位置由启动器用 `boot::data_dir` 算好、`set_default` 进来。
     path: Option<String>,
     /// 只读打开：不建文件、不执行迁移、拒绝写入。给只查询的进程用。
     read_only: bool,
@@ -51,17 +51,9 @@ fn resolve_path(configured: Option<&str>) -> Result<String, AppError> {
                 .ok_or_else(|| AppError::config("path 用了 ~，但环境里没有 HOME")),
             None => Ok(path.to_owned()),
         },
-        None => {
-            let base = std::env::var_os("XDG_DATA_HOME")
-                .map(PathBuf::from)
-                .filter(|p| p.is_absolute())
-                .or_else(|| home().map(|h| h.join(".local/share")))
-                .ok_or_else(|| AppError::config("没有配置 path，环境里也没有 HOME"))?;
-            Ok(base
-                .join("lifelog/lifelog.db")
-                .to_string_lossy()
-                .into_owned())
-        }
+        None => Err(AppError::config(
+            "没有配置数据库文件：在 [components.storage-sqlite] 里写 path（启动器通常会给默认值）",
+        )),
     }
 }
 

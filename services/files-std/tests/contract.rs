@@ -38,3 +38,16 @@ async fn a_relative_root_is_a_config_error() {
         .unwrap();
     assert_eq!(err.kind, ErrorKind::Config);
 }
+
+#[tokio::test]
+async fn a_missing_root_is_a_config_error() {
+    let err = testkit::app()
+        .with(FilesStd)
+        .config("files-std", json!({}))
+        .unwrap()
+        .boot()
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(err.kind, ErrorKind::Config);
+}

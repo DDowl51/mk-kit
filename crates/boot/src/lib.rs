@@ -8,7 +8,7 @@ mod flags;
 mod launch;
 mod trace;
 
-pub use config::{Settings, config_path, load};
+pub use config::{Settings, config_path, data_dir, load};
 pub use flags::{Flags, launcher_flags};
 pub use launch::{App, Shutdown, block_on, socket_path, start, wait};
 pub use trace::{StderrFaults, StderrTrace, report, say};

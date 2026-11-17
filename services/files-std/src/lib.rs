@@ -10,19 +10,12 @@ use kernel_api::{
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 struct Config {
     /// 根目录。不存在时第一次写入会建出来。
-    root: String,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            root: "~/lifelog".to_owned(),
-        }
-    }
+    /// 必须有：这个服务不知道自己被哪个应用用，默认值由启动器 `set_default` 进来。
+    root: Option<String>,
 }
 
 fn expand(path: &str) -> Result<PathBuf, AppError> {
@@ -169,7 +162,11 @@ impl Component for FilesStd {
     fn start(&self, config: &ConfigSection, host: &mut Host<'_>) -> Result<(), AppError> {
         let config: Config = config.parse()?;
         let dir = Dir {
-            root: expand(&config.root)?,
+            root: expand(config.root.as_deref().ok_or_else(|| {
+                AppError::config(
+                    "没有配置根目录：在 [components.files-std] 里写 root（启动器通常会给默认值）",
+                )
+            })?)?,
         };
         host.provide(&FILES, Arc::new(dir))
     }

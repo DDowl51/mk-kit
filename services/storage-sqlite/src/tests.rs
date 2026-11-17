@@ -375,5 +375,5 @@ fn config_defaults_and_paths() {
         resolve_path(Some("~/x.db")).unwrap(),
         format!("{home}/x.db")
     );
-    assert!(resolve_path(None).unwrap().ends_with("/lifelog/lifelog.db"));
+    assert_eq!(resolve_path(None).unwrap_err().kind, ErrorKind::Config);
 }
