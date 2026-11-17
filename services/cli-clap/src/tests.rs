@@ -345,3 +345,60 @@ fn exit_codes_follow_sysexits() {
     .collect();
     assert_eq!(codes, [65, 66, 3, 77, 75, 69, 78]);
 }
+
+/// 登记了一个和全局选项 `--text` 重名的参数。
+struct Clashing;
+
+#[async_trait]
+impl CommandProvider for Clashing {
+    async fn commands(&self) -> Result<Vec<CommandSpec>, AppError> {
+        Ok(vec![CommandSpec {
+            name: "add".to_owned(),
+            about: "测试用".to_owned(),
+            args: vec![arg("text", ArgKind::Rest)],
+        }])
+    }
+
+    async fn run(&self, _: Invocation) -> Result<Output, AppError> {
+        Ok(Output {
+            text: String::new(),
+        })
+    }
+}
+
+struct ClashingContributor;
+
+impl Component for ClashingContributor {
+    fn manifest(&self) -> Manifest {
+        Manifest {
+            id: "clashing",
+            kind: Kind::Feature,
+            summary: "测试用",
+            provides: vec![],
+            requires: vec![CLI_COMMANDS.id()],
+            optional_requires: vec![],
+        }
+    }
+
+    fn start(&self, _: &ConfigSection, host: &mut Host<'_>) -> Result<(), AppError> {
+        host.contribute(&CLI_COMMANDS, Arc::new(Clashing))
+    }
+}
+
+#[tokio::test]
+async fn an_argument_named_like_a_global_option_is_a_config_error_not_a_crash() {
+    let capture = Capture {
+        env: PIPE,
+        written: Arc::default(),
+    };
+    let app = testkit::app()
+        .with(capture)
+        .with(ClashingContributor)
+        .boot()
+        .await
+        .unwrap();
+    let argv = ["stash", "add", "x"].map(str::to_owned).to_vec();
+    let err = app.resolve(&CLI).unwrap().run(argv).await.unwrap_err();
+    assert_eq!(err.kind, ErrorKind::Config);
+    assert!(err.message.contains("`text`"), "{}", err.message);
+}

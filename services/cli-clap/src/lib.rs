@@ -114,6 +114,9 @@ fn global_args() -> [Arg; 5] {
     ]
 }
 
+/// 全局选项的名字。登记的参数不能用，否则和全局选项撞在一起，clap 会在取值时崩溃。
+const RESERVED: &[&str] = &["json", "text", "color", "trace", "config", "help"];
+
 fn build(program: &str, specs: &[CommandSpec]) -> Command {
     let mut root = Command::new(program.to_owned())
         .subcommand_required(true)
@@ -179,6 +182,18 @@ impl Service {
                     return Err(AppError::config(format!(
                         "有两个组件都登记了子命令 `{}`",
                         spec.name
+                    )));
+                }
+                if let Some(arg) = spec
+                    .args
+                    .iter()
+                    .find(|a| RESERVED.contains(&a.name.as_str()))
+                {
+                    return Err(AppError::config(format!(
+                        "子命令 `{}` 的参数 `{}` 和全局选项重名，换个名字（保留的有：{}）",
+                        spec.name,
+                        arg.name,
+                        RESERVED.join("、")
                     )));
                 }
                 specs.push(spec);
