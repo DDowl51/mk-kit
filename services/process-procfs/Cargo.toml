@@ -1,0 +1,24 @@
+[package]
+name = "process-procfs"
+description = "系统服务：读 /proc，提供 Processes。"
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[package.metadata.component]
+id = "process-procfs"
+
+[dependencies]
+kernel-api.workspace = true
+process-contract.workspace = true
+serde.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+process-contract = { workspace = true, features = ["testing"] }
+testkit.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

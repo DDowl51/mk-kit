@@ -1,0 +1,24 @@
+[package]
+name = "vcs-git"
+description = "系统服务：调 git 命令，提供 Vcs。"
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[package.metadata.component]
+id = "vcs-git"
+
+[dependencies]
+kernel-api.workspace = true
+vcs-contract.workspace = true
+serde.workspace = true
+tokio = { workspace = true, features = ["process"] }
+
+[dev-dependencies]
+vcs-contract = { workspace = true, features = ["testing"] }
+testkit.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true
