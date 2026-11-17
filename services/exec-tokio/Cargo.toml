@@ -1,0 +1,22 @@
+[package]
+name = "exec-tokio"
+description = "系统服务：用 tokio 起子进程，提供 Exec。"
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[package.metadata.component]
+id = "exec-tokio"
+
+[dependencies]
+kernel-api.workspace = true
+exec-contract.workspace = true
+tokio = { workspace = true, features = ["process", "io-util"] }
+
+[dev-dependencies]
+exec-contract = { workspace = true, features = ["testing"] }
+testkit.workspace = true
+
+[lints]
+workspace = true

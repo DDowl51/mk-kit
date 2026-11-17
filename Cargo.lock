@@ -534,6 +534,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "exec-contract"
+version = "0.1.0"
+dependencies = [
+ "kernel-api",
+ "serde",
+]
+
+[[package]]
+name = "exec-tokio"
+version = "0.1.0"
+dependencies = [
+ "exec-contract",
+ "kernel-api",
+ "testkit",
+ "tokio",
+]
+
+[[package]]
 name = "fallible-iterator"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

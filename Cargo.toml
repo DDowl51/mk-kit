@@ -17,6 +17,7 @@ testkit = { path = "crates/testkit" }
 browser-contract = { path = "contracts/browser" }
 cli-contract = { path = "contracts/cli" }
 clock-contract = { path = "contracts/clock" }
+exec-contract = { path = "contracts/exec" }
 files-contract = { path = "contracts/files" }
 log-contract = { path = "contracts/log" }
 sql-contract = { path = "contracts/sql" }
