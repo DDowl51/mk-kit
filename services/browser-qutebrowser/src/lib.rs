@@ -64,11 +64,18 @@ const SELECT: &str = "
     ORDER BY rowid
     LIMIT ?2";
 
-fn read(db: &Path, after: i64, limit: u32) -> Result<Vec<(i64, Visit)>, AppError> {
+/// 最近的访问：不早于 ?1，最新的在前。
+const RECENT: &str = "
+    SELECT rowid, atime, url, title FROM History
+    WHERE atime >= ?1 AND redirect = 0
+    ORDER BY atime DESC, rowid DESC
+    LIMIT ?2";
+
+fn query(db: &Path, sql: &str, after: i64, limit: u32) -> Result<Vec<(i64, Visit)>, AppError> {
     let (_dir, copy) = snapshot(db)?;
     let fail = |e: rusqlite::Error| AppError::unavailable(format!("读 {} 失败：{e}", db.display()));
     let conn = Connection::open(&copy).map_err(fail)?;
-    let mut stmt = conn.prepare(SELECT).map_err(fail)?;
+    let mut stmt = conn.prepare(sql).map_err(fail)?;
     stmt.query_map(params![after, limit], |r| {
         let id: i64 = r.get(0)?;
         let secs: i64 = r.get(1)?;
@@ -155,7 +162,7 @@ impl BrowserAdapter for Qutebrowser {
                 .map_err(|_| AppError::validation(format!("看不懂的游标 `{c}`")))?,
             None => 0,
         };
-        let rows = tokio::task::spawn_blocking(move || read(&db, after, limit))
+        let rows = tokio::task::spawn_blocking(move || query(&db, SELECT, after, limit))
             .await
             .map_err(|e| AppError::unavailable(format!("读浏览历史的线程崩了：{e}")))??;
         let next = rows.last().map_or(after, |(id, _)| *id);
@@ -164,6 +171,18 @@ impl BrowserAdapter for Qutebrowser {
             visits: rows.into_iter().map(|(_, v)| v).collect(),
             next: next.to_string(),
         })
+    }
+
+    async fn recent(&self, source: String, since: i64, limit: u32) -> Result<Vec<Visit>, AppError> {
+        let Some((_, db)) = self.scan().into_iter().find(|(s, _)| s.id == source) else {
+            return Err(AppError::not_found(format!("没有来源 `{source}`")));
+        };
+        // atime 是秒：不早于 since 毫秒 = 不早于向上取整的那一秒
+        let from = since.saturating_add(999) / 1_000;
+        let rows = tokio::task::spawn_blocking(move || query(&db, RECENT, from, limit))
+            .await
+            .map_err(|e| AppError::unavailable(format!("读浏览历史的线程崩了：{e}")))??;
+        Ok(rows.into_iter().map(|(_, v)| v).collect())
     }
 }
 

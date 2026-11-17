@@ -6,7 +6,8 @@
 use std::sync::Arc;
 
 use browser_contract::{
-    BROWSER_ADAPTERS, BROWSER_HISTORY, BrowserAdapter, BrowserHistory, HistorySource, VisitPage,
+    BROWSER_ADAPTERS, BROWSER_HISTORY, BrowserAdapter, BrowserHistory, HistorySource, Visit,
+    VisitPage,
 };
 use kernel_api::{
     AppError, Collector, Component, ConfigSection, Host, Kind, Manifest, NoConfig, async_trait,
@@ -61,6 +62,15 @@ impl BrowserHistory for History {
         for (adapter, sources) in self.all().await {
             if sources.iter().any(|s| s.id == source) {
                 return adapter.read(source, after, limit).await;
+            }
+        }
+        Err(AppError::not_found(format!("没有来源 `{source}`")))
+    }
+
+    async fn recent(&self, source: String, since: i64, limit: u32) -> Result<Vec<Visit>, AppError> {
+        for (adapter, sources) in self.all().await {
+            if sources.iter().any(|s| s.id == source) {
+                return adapter.recent(source, since, limit).await;
             }
         }
         Err(AppError::not_found(format!("没有来源 `{source}`")))

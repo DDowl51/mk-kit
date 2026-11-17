@@ -48,22 +48,28 @@ pub struct VisitPage {
 
 contract! {
     /// 浏览器的访问历史：所有浏览器、所有 profile 合在一起。
-    pub trait BrowserHistory as BROWSER_HISTORY = service("browser.history", 1) {
+    pub trait BrowserHistory as BROWSER_HISTORY = service("browser.history", 2) {
         /// 现在能读的来源。浏览器没装、profile 被删了，就不在里面。
         async fn sources(&self) -> Result<Vec<HistorySource>, AppError>;
 
         /// 从游标 `after` 之后读最多 `limit` 条（`None` 表示从头读）。来源不存在是 `not_found`。
         /// 可能把给过的访问再给一次，读的一方按 `id` 去重。
         async fn read(&self, source: String, after: Option<String>, limit: u32) -> Result<VisitPage, AppError>;
+
+        /// 时刻不早于 `since`（UTC 毫秒）的访问，按时刻倒序（最新的在前），最多 `limit` 条。
+        /// 来源不存在是 `not_found`。用来回答「刚才在看什么」，不用从头翻。
+        async fn recent(&self, source: String, since: i64, limit: u32) -> Result<Vec<Visit>, AppError>;
     }
 }
 
 contract! {
     /// 扩展点：一种浏览器的适配。方法的含义同 [`BrowserHistory`]，只管自己的来源。
-    pub trait BrowserAdapter as BROWSER_ADAPTERS = point("browser.adapters", 1) {
+    pub trait BrowserAdapter as BROWSER_ADAPTERS = point("browser.adapters", 2) {
         async fn sources(&self) -> Result<Vec<HistorySource>, AppError>;
 
         async fn read(&self, source: String, after: Option<String>, limit: u32) -> Result<VisitPage, AppError>;
+
+        async fn recent(&self, source: String, since: i64, limit: u32) -> Result<Vec<Visit>, AppError>;
     }
 }
 
@@ -159,6 +165,27 @@ pub mod testing {
             Err(e) => assert_eq!(e.kind, kernel_api::ErrorKind::NotFound, "{e}"),
             Ok(page) => panic!("不存在的来源应该是 not_found：{page:?}"),
         }
+
+        // 最近的：不早于 since，最新的在前
+        let at = |visits: &[Visit]| visits.iter().map(|v| v.at).collect::<Vec<_>>();
+        let recent = history.recent(source.to_owned(), 2_000, 10).await?;
+        assert_eq!(at(&recent), [4_000, 3_000, 2_000], "{recent:?}");
+        assert_eq!(recent[0].url, "https://d.example/");
+        assert_eq!(recent[0].title.as_deref(), Some("丁"));
+        assert_eq!(
+            at(&history.recent(source.to_owned(), 2_000, 2).await?),
+            [4_000, 3_000]
+        );
+        assert!(
+            history
+                .recent(source.to_owned(), 5_000, 10)
+                .await?
+                .is_empty()
+        );
+        match history.recent("no-such-source".to_owned(), 0, 10).await {
+            Err(e) => assert_eq!(e.kind, kernel_api::ErrorKind::NotFound, "{e}"),
+            Ok(v) => panic!("不存在的来源应该是 not_found：{v:?}"),
+        }
         Ok(())
     }
 
@@ -222,6 +249,22 @@ pub mod testing {
                 next: end.max(start).to_string(),
                 more: end < list.len(),
             })
+        }
+
+        async fn recent(
+            &self,
+            source: String,
+            since: i64,
+            limit: u32,
+        ) -> Result<Vec<Visit>, AppError> {
+            let all = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+            let (_, list) = all
+                .get(&source)
+                .ok_or_else(|| AppError::not_found(format!("没有来源 `{source}`")))?;
+            let mut out: Vec<Visit> = list.iter().filter(|v| v.at >= since).cloned().collect();
+            out.sort_by_key(|v| std::cmp::Reverse(v.at));
+            out.truncate(limit as usize);
+            Ok(out)
         }
     }
 

@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use browser_contract::testing::{MemoryBrowser, visit};
 use browser_contract::{
-    BROWSER_ADAPTERS, BROWSER_HISTORY, BrowserAdapter, HistorySource, VisitPage,
+    BROWSER_ADAPTERS, BROWSER_HISTORY, BrowserAdapter, HistorySource, Visit, VisitPage,
 };
 use browser_history::BrowserHistoryService;
 use kernel_api::{
@@ -26,6 +26,10 @@ impl BrowserAdapter for Other {
 
     async fn read(&self, s: String, a: Option<String>, l: u32) -> Result<VisitPage, AppError> {
         self.0.read(s, a, l).await
+    }
+
+    async fn recent(&self, s: String, since: i64, l: u32) -> Result<Vec<Visit>, AppError> {
+        self.0.recent(s, since, l).await
     }
 }
 
@@ -57,6 +61,10 @@ impl BrowserAdapter for Broken {
     }
 
     async fn read(&self, _: String, _: Option<String>, _: u32) -> Result<VisitPage, AppError> {
+        Err(AppError::unavailable("配置目录读不了"))
+    }
+
+    async fn recent(&self, _: String, _: i64, _: u32) -> Result<Vec<Visit>, AppError> {
         Err(AppError::unavailable("配置目录读不了"))
     }
 }
@@ -111,6 +119,13 @@ async fn sources_from_all_browsers_and_reads_are_routed() {
         .unwrap();
     assert_eq!(page.visits[0].url, "https://b/");
     let err = history.read("nope".to_owned(), None, 10).await.unwrap_err();
+    assert_eq!(err.kind, ErrorKind::NotFound);
+    let recent = history
+        .recent("chrome/Default".to_owned(), 0, 10)
+        .await
+        .unwrap();
+    assert_eq!(recent[0].url, "https://b/");
+    let err = history.recent("nope".to_owned(), 0, 10).await.unwrap_err();
     assert_eq!(err.kind, ErrorKind::NotFound);
     assert!(
         log.lines().iter().any(|l| l.contains("配置目录读不了")),
