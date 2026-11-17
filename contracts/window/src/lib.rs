@@ -19,6 +19,9 @@ pub struct WindowInfo {
     /// 所在工作区的名字。没有命名的工作区、或者窗口管理器没有工作区这个概念时是 `None`。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<String>,
+    /// 窗口所属进程的 pid。窗口管理器不知道时是 `None`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
 }
 
 /// 焦点变了。
@@ -112,6 +115,7 @@ pub mod testing {
             app_id: Some(app_id.to_owned()),
             title: Some(title.to_owned()),
             workspace: None,
+            pid: None,
         }
     }
 }

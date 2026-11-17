@@ -97,12 +97,49 @@ impl Engine {
     }
 }
 
-struct Service(Arc<Engine>);
+struct Service {
+    engine: Arc<Engine>,
+    /// 回放时没有。
+    socket: Option<String>,
+}
+
+/// 发一个一次性请求，读回一行。每个请求一个连接。
+async fn request(socket: &str, request: &str) -> Result<String, AppError> {
+    let failed =
+        |e: std::io::Error| AppError::unavailable(format!("问 niri 失败（{socket}）：{e}"));
+    let mut conn = UnixStream::connect(socket).await.map_err(failed)?;
+    conn.write_all(format!("\"{request}\"\n").as_bytes())
+        .await
+        .map_err(failed)?;
+    let mut line = String::new();
+    BufReader::new(conn)
+        .read_line(&mut line)
+        .await
+        .map_err(failed)?;
+    Ok(line)
+}
+
+/// 直接问 niri 现在的焦点。
+async fn ask_focused(socket: &str) -> Result<Option<WindowInfo>, AppError> {
+    let (window, workspaces) = tokio::try_join!(
+        request(socket, "FocusedWindow"),
+        request(socket, "Workspaces")
+    )?;
+    let bad = |why: String| AppError::unavailable(format!("niri 的回复不对：{why}"));
+    let window = ipc::parse_focused_reply(&window).map_err(bad)?;
+    let workspaces = ipc::parse_workspaces_reply(&workspaces).map_err(bad)?;
+    Ok(window.map(|w| table::info_of(w, &workspaces)))
+}
 
 #[async_trait]
 impl Windows for Service {
     async fn focused(&self) -> Result<Option<WindowInfo>, AppError> {
-        Ok(self.0.table().current())
+        // 事件流刚连上（比如一次性的命令行进程刚启动）时表还是空的，这时直接问
+        let synced = self.engine.table().synced();
+        match &self.socket {
+            Some(socket) if !synced => ask_focused(socket).await,
+            _ => Ok(self.engine.table().current()),
+        }
     }
 }
 
@@ -177,6 +214,7 @@ impl Component for WmNiri {
         let engine = Arc::new(Engine::new(host.publisher(&FOCUS_CHANGED)?));
 
         let task_engine = engine.clone();
+        let task_socket = socket.clone();
         host.spawn("stream", move |cancel| async move {
             let engine = task_engine;
             let initial = Duration::from_millis(config.reconnect_initial_ms.max(1));
@@ -185,7 +223,7 @@ impl Component for WmNiri {
             loop {
                 let (connected, why) = tokio::select! {
                     () = cancel.cancelled() => break,
-                    outcome = stream(&engine, clock.as_ref(), &log, &socket) => outcome,
+                    outcome = stream(&engine, clock.as_ref(), &log, &task_socket) => outcome,
                 };
                 if connected {
                     delay = initial;
@@ -204,7 +242,13 @@ impl Component for WmNiri {
             }
         });
 
-        host.provide(&WINDOWS, Arc::new(Service(engine)))
+        host.provide(
+            &WINDOWS,
+            Arc::new(Service {
+                engine,
+                socket: Some(socket),
+            }),
+        )
     }
 }
 

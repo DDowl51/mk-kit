@@ -100,6 +100,7 @@ async fn replay_publishes_focus_changes() {
                     app_id: Some("ghostty".to_owned()),
                     title: Some("nvim".to_owned()),
                     workspace: None,
+                    pid: None,
                 })
             },
             FocusChanged {
@@ -109,6 +110,7 @@ async fn replay_publishes_focus_changes() {
                     app_id: Some("zen".to_owned()),
                     title: Some("Rust".to_owned()),
                     workspace: None,
+                    pid: None,
                 })
             },
             FocusChanged {
@@ -287,6 +289,89 @@ async fn keeps_retrying_while_niri_is_down() {
     tokio::time::timeout(Duration::from_secs(2), rig.app.stop())
         .await
         .unwrap();
+}
+
+/// 接受一个一次性请求的连接，按请求名回复。返回请求名。
+async fn answer_one(listener: &UnixListener) -> String {
+    let (conn, _) = tokio::time::timeout(Duration::from_secs(5), listener.accept())
+        .await
+        .unwrap()
+        .unwrap();
+    let mut reader = BufReader::new(conn);
+    let mut request = String::new();
+    reader.read_line(&mut request).await.unwrap();
+    let reply = match request.as_str() {
+        "\"FocusedWindow\"\n" => {
+            r#"{"Ok":{"FocusedWindow":{"id":9,"title":"PR #12","app_id":"zen","pid":4321,"workspace_id":3,"is_focused":true}}}"#
+        }
+        "\"Workspaces\"\n" => r#"{"Ok":{"Workspaces":[{"id":3,"idx":1,"name":"web"}]}}"#,
+        other => panic!("没想到的请求 {other:?}"),
+    };
+    let mut conn = reader.into_inner();
+    conn.write_all(format!("{reply}\n").as_bytes())
+        .await
+        .unwrap();
+    request.trim().to_owned()
+}
+
+#[tokio::test]
+async fn asks_niri_directly_until_the_event_stream_has_the_full_picture() {
+    let rig = rig().await;
+    let mut niri = accept(&rig.listener).await;
+    let windows = rig.app.resolve(&WINDOWS).unwrap();
+
+    // 一次性进程刚启动：事件流还没给完整的窗口列表，直接问
+    let asking = tokio::spawn({
+        let windows = windows.clone();
+        async move { windows.focused().await }
+    });
+    let mut asked = vec![
+        answer_one(&rig.listener).await,
+        answer_one(&rig.listener).await,
+    ];
+    asked.sort();
+    assert_eq!(asked, ["\"FocusedWindow\"", "\"Workspaces\""]);
+    assert_eq!(
+        asking.await.unwrap().unwrap(),
+        Some(WindowInfo {
+            id: 9,
+            app_id: Some("zen".to_owned()),
+            title: Some("PR #12".to_owned()),
+            workspace: Some("web".to_owned()),
+            pid: Some(4321),
+        })
+    );
+
+    // 有了完整的窗口列表之后用表里的，不再连 niri（要是去连了，没人应答，会超时）
+    niri.write_all(format!("{SNAPSHOT}\n").as_bytes())
+        .await
+        .unwrap();
+    wait_for(&rig.seen, 1).await;
+    let focused = tokio::time::timeout(Duration::from_secs(1), windows.focused())
+        .await
+        .expect("不该再去问 niri")
+        .unwrap();
+    assert_eq!(focused.and_then(|w| w.title), Some("nvim".to_owned()));
+    rig.app.stop().await;
+}
+
+#[tokio::test]
+async fn a_failed_direct_question_is_unavailable() {
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("nobody-listens.sock");
+    let app = testkit::app()
+        .with(WmNiri)
+        .config("wm-niri", json!({ "socket": socket.to_string_lossy() }))
+        .unwrap()
+        .with(FakeClock::at(0, 0))
+        .with(MemoryLog::default())
+        .background_delivery()
+        .boot()
+        .await
+        .unwrap();
+    let err = app.resolve(&WINDOWS).unwrap().focused().await.unwrap_err();
+    assert_eq!(err.kind, ErrorKind::Unavailable, "{err}");
+    app.stop().await;
 }
 
 #[tokio::test]

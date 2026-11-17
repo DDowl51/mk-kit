@@ -50,6 +50,12 @@ impl Component for NiriReplay {
     fn start(&self, _config: &ConfigSection, host: &mut Host<'_>) -> Result<(), AppError> {
         let engine = Arc::new(Engine::new(host.publisher(&FOCUS_CHANGED)?));
         let _ = self.engine.set(engine.clone());
-        host.provide(&WINDOWS, Arc::new(Service(engine)))
+        host.provide(
+            &WINDOWS,
+            Arc::new(Service {
+                engine,
+                socket: None,
+            }),
+        )
     }
 }

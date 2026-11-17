@@ -7,7 +7,7 @@
 use serde::Deserialize;
 use serde_json::Value;
 
-/// 窗口信息。只取用得到的字段，其余字段（布局、pid……）忽略。
+/// 窗口信息。只取用得到的字段，其余字段（布局……）忽略。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub(crate) struct Window {
     pub id: u64,
@@ -20,6 +20,9 @@ pub(crate) struct Window {
     /// 所在工作区的编号。
     #[serde(default)]
     pub workspace_id: Option<u64>,
+    /// 窗口所属进程。
+    #[serde(default)]
+    pub pid: Option<u32>,
 }
 
 /// 工作区。只取编号和名字。
@@ -68,9 +71,74 @@ pub(crate) fn parse_line(line: &str) -> Result<Option<NiriEvent>, serde_json::Er
     }
 }
 
+/// 一次性请求的回复：成功是 `{"Ok":{"请求名":结果}}`，失败是 `{"Err":"原因"}`。
+#[derive(Debug, Deserialize)]
+enum Reply<T> {
+    Ok(T),
+    Err(String),
+}
+
+#[derive(Debug, Deserialize)]
+struct FocusedWindowReply {
+    #[serde(rename = "FocusedWindow")]
+    window: Option<Window>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WorkspacesReply {
+    #[serde(rename = "Workspaces")]
+    workspaces: Vec<Workspace>,
+}
+
+/// 请求 `"FocusedWindow"` 的回复。
+pub(crate) fn parse_focused_reply(line: &str) -> Result<Option<Window>, String> {
+    match serde_json::from_str::<Reply<FocusedWindowReply>>(line) {
+        Ok(Reply::Ok(reply)) => Ok(reply.window),
+        Ok(Reply::Err(why)) => Err(why),
+        Err(e) => Err(format!("回复看不懂：{e}")),
+    }
+}
+
+/// 请求 `"Workspaces"` 的回复。
+pub(crate) fn parse_workspaces_reply(line: &str) -> Result<Vec<Workspace>, String> {
+    match serde_json::from_str::<Reply<WorkspacesReply>>(line) {
+        Ok(Reply::Ok(reply)) => Ok(reply.workspaces),
+        Ok(Reply::Err(why)) => Err(why),
+        Err(e) => Err(format!("回复看不懂：{e}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replies_to_one_off_requests() {
+        let w = parse_focused_reply(
+            r#"{"Ok":{"FocusedWindow":{"id":7,"title":"t","app_id":"zen","pid":12,"workspace_id":3,"is_focused":true,"layout":{}}}}"#,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!((w.id, w.pid, w.workspace_id), (7, Some(12), Some(3)));
+        assert_eq!(
+            parse_focused_reply(r#"{"Ok":{"FocusedWindow":null}}"#),
+            Ok(None)
+        );
+        assert_eq!(
+            parse_workspaces_reply(
+                r#"{"Ok":{"Workspaces":[{"id":3,"idx":1,"name":"web","output":"x"}]}}"#
+            ),
+            Ok(vec![Workspace {
+                id: 3,
+                name: Some("web".to_owned())
+            }])
+        );
+        assert_eq!(
+            parse_focused_reply(r#"{"Err":"nope"}"#),
+            Err("nope".to_owned())
+        );
+        assert!(parse_workspaces_reply("garbage").is_err());
+    }
 
     #[test]
     fn focus_changed() {
@@ -96,6 +164,7 @@ mod tests {
                     app_id: Some("com.mitchellh.ghostty".to_owned()),
                     is_focused: true,
                     workspace_id: Some(1),
+                    pid: Some(4242),
                 }
             })
         );
@@ -116,6 +185,7 @@ mod tests {
                     app_id: Some("zen".to_owned()),
                     is_focused: false,
                     workspace_id: None,
+                    pid: None,
                 }]
             })
         );

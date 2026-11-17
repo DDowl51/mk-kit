@@ -4,13 +4,14 @@ use std::collections::HashMap;
 
 use window_contract::WindowInfo;
 
-use crate::ipc::{NiriEvent, Window};
+use crate::ipc::{NiriEvent, Window, Workspace};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Entry {
     app_id: Option<String>,
     title: Option<String>,
     workspace_id: Option<u64>,
+    pid: Option<u32>,
 }
 
 impl From<Window> for Entry {
@@ -19,6 +20,7 @@ impl From<Window> for Entry {
             app_id: window.app_id,
             title: window.title,
             workspace_id: window.workspace_id,
+            pid: window.pid,
         }
     }
 }
@@ -32,9 +34,31 @@ pub(crate) struct Table {
     focused: Option<u64>,
     /// 上一次报告出去的焦点。
     reported: Option<WindowInfo>,
+    /// 收到过完整的窗口列表：表里的内容可信。刚连上、断线之后都是 `false`。
+    synced: bool,
+}
+
+/// 一次性查询的结果拼成 `WindowInfo`。
+pub(crate) fn info_of(window: Window, workspaces: &[Workspace]) -> WindowInfo {
+    let workspace = window
+        .workspace_id
+        .and_then(|w| workspaces.iter().find(|ws| ws.id == w))
+        .and_then(|ws| ws.name.clone());
+    WindowInfo {
+        id: window.id,
+        app_id: window.app_id,
+        title: window.title,
+        workspace,
+        pid: window.pid,
+    }
 }
 
 impl Table {
+    /// 表里的内容可信吗（收到过完整的窗口列表）。
+    pub(crate) const fn synced(&self) -> bool {
+        self.synced
+    }
+
     /// 现在有焦点的窗口。
     pub(crate) fn current(&self) -> Option<WindowInfo> {
         self.focused.map(|id| {
@@ -48,6 +72,7 @@ impl Table {
                 app_id: entry.app_id,
                 title: entry.title,
                 workspace,
+                pid: entry.pid,
             }
         })
     }
@@ -59,6 +84,7 @@ impl Table {
             NiriEvent::WindowsChanged { windows } => {
                 self.windows.clear();
                 self.focused = None;
+                self.synced = true;
                 for window in windows {
                     if window.is_focused {
                         self.focused = Some(window.id);
@@ -91,6 +117,7 @@ impl Table {
         self.windows.clear();
         self.workspaces.clear();
         self.focused = None;
+        self.synced = false;
         self.report()
     }
 
@@ -116,6 +143,7 @@ mod tests {
             app_id: Some(app.to_owned()),
             is_focused: focused,
             workspace_id: None,
+            pid: None,
         }
     }
 
@@ -125,6 +153,7 @@ mod tests {
             app_id: Some(app.to_owned()),
             title: Some(title.to_owned()),
             workspace: None,
+            pid: None,
         }
     }
 
@@ -234,6 +263,7 @@ mod tests {
                 app_id: None,
                 title: None,
                 workspace: None,
+                pid: None,
             }))
         );
     }
