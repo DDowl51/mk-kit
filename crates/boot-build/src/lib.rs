@@ -5,7 +5,8 @@
 //! - 每个被这个启动器依赖的组件包一行 `use 包名 as _;`。只在 `Cargo.toml` 里写依赖而不引用，
 //!   链接器会把整个包丢掉，组件就登记不上；
 //! - `LINKED_COMPONENTS`：这个启动器链接了哪些组件；
-//! - `KNOWN_COMPONENTS`：仓库里有哪些组件。读配置时用它区分「别的进程的组件」和「拼写错误」。
+//! - `KNOWN_COMPONENTS`：仓库里有哪些组件，包括 `[workspace.dependencies]` 里用 path 引进来的、
+//!   别的仓库（共享仓库 mk-kit）里的组件。读配置时用它区分「别的进程的组件」和「拼写错误」。
 //!
 //! 所以加一个组件 = 加一个包、在要用它的启动器的依赖里加一行，不用改任何列表。
 
@@ -57,7 +58,38 @@ fn subdirs(dir: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// 仓库里所有声明了 `[package.metadata.component]` 的包。
+/// 包的名字和组件 id；不是组件包时 id 是 `None`。
+fn package_of(manifest: &Path) -> Result<(Option<String>, Option<String>), String> {
+    let doc = read_toml(manifest)?;
+    let package = doc.get("package").and_then(|p| p.as_table());
+    let name = package.and_then(|p| p.get("name")).and_then(|n| n.as_str());
+    let id = package
+        .and_then(|p| p.get("metadata"))
+        .and_then(|m| m.get("component"))
+        .and_then(|c| c.get("id"))
+        .and_then(|i| i.as_str());
+    Ok((name.map(str::to_owned), id.map(str::to_owned)))
+}
+
+/// `[workspace.dependencies]` 里用 path 引进来、在本仓库之外的包的目录（共享仓库里的包）。
+fn external_path_deps(root: &Path) -> Result<Vec<PathBuf>, String> {
+    let doc = read_toml(&root.join("Cargo.toml"))?;
+    let deps = doc
+        .get("workspace")
+        .and_then(|w| w.get("dependencies"))
+        .and_then(|d| d.as_table());
+    let mut out: Vec<PathBuf> = deps
+        .into_iter()
+        .flat_map(|t| t.values())
+        .filter_map(|v| v.get("path").and_then(|p| p.as_str()))
+        .map(|p| root.join(p))
+        .filter(|dir| !dir.starts_with(root) || dir.components().any(|c| c.as_os_str() == ".."))
+        .collect();
+    out.sort();
+    Ok(out)
+}
+
+/// 仓库里所有声明了 `[package.metadata.component]` 的包，加上从别的仓库用 path 引进来的组件包。
 fn scan(root: &Path) -> Result<Vec<ComponentPackage>, String> {
     let mut dirs = subdirs(&root.join("services"));
     dirs.extend(
@@ -72,19 +104,11 @@ fn scan(root: &Path) -> Result<Vec<ComponentPackage>, String> {
         if !manifest.is_file() {
             continue;
         }
-        let doc = read_toml(&manifest)?;
-        let package = doc.get("package").and_then(|p| p.as_table());
-        let name = package.and_then(|p| p.get("name")).and_then(|n| n.as_str());
-        let id = package
-            .and_then(|p| p.get("metadata"))
-            .and_then(|m| m.get("component"))
-            .and_then(|c| c.get("id"))
-            .and_then(|i| i.as_str());
-        match (name, id) {
+        match package_of(&manifest)? {
             (Some(name), Some(id)) => {
                 found.push(ComponentPackage {
-                    package: name.to_owned(),
-                    id: id.to_owned(),
+                    package: name,
+                    id,
                     manifest,
                 });
             }
@@ -94,6 +118,17 @@ fn scan(root: &Path) -> Result<Vec<ComponentPackage>, String> {
                     manifest.display()
                 ));
             }
+        }
+    }
+    // 别的仓库里的包只收组件包；契约包、kernel 这些不是组件，跳过。
+    for dir in external_path_deps(root)? {
+        let manifest = dir.join("Cargo.toml");
+        if let (Some(name), Some(id)) = package_of(&manifest)? {
+            found.push(ComponentPackage {
+                package: name,
+                id,
+                manifest,
+            });
         }
     }
     found.sort_by(|a, b| a.id.cmp(&b.id));
@@ -213,6 +248,48 @@ mod tests {
             "[package]\nname = \"cli\"\n\n[dependencies]\nboot = {}\nclock-system = {}\nfocus = {}\n",
         );
         dir
+    }
+
+    #[test]
+    fn knows_components_from_a_shared_repo_through_path_dependencies() {
+        let dir = tempfile::tempdir().unwrap();
+        let shared = dir.path().join("kit");
+        let root = dir.path().join("app-repo");
+        write(&shared, "Cargo.toml", "[workspace]\nmembers = []\n");
+        write(
+            &shared,
+            "services/clock-system/Cargo.toml",
+            &component("clock-system", "clock-system"),
+        );
+        write(
+            &shared,
+            "contracts/clock/Cargo.toml",
+            "[package]\nname = \"clock-contract\"\n",
+        );
+        write(
+            &root,
+            "Cargo.toml",
+            "[workspace]\nmembers = []\n\n[workspace.dependencies]\n\
+             clock-system = { path = \"../kit/services/clock-system\" }\n\
+             clock-contract = { path = \"../kit/contracts/clock\" }\n\
+             serde = \"1\"\n",
+        );
+        write(
+            &root,
+            "features/focus/component/Cargo.toml",
+            &component("focus", "focus"),
+        );
+        write(
+            &root,
+            "apps/cli/Cargo.toml",
+            "[package]\nname = \"cli\"\n\n[dependencies]\nclock-system = {}\n",
+        );
+        let (code, _) = render(&root.join("apps/cli/Cargo.toml")).unwrap();
+        assert!(code.contains("use clock_system as _;"), "{code}");
+        assert!(
+            code.contains("KNOWN_COMPONENTS: &[&str] = &[\"clock-system\", \"focus\"]"),
+            "{code}"
+        );
     }
 
     #[test]
