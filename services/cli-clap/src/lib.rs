@@ -117,35 +117,113 @@ fn global_args() -> [Arg; 5] {
 /// 全局选项的名字。登记的参数不能用，否则和全局选项撞在一起，clap 会在取值时崩溃。
 const RESERVED: &[&str] = &["json", "text", "color", "trace", "config", "help"];
 
+/// 一个子命令（叶子）。名字是 `spec.name` 的最后一个词。
+fn leaf(spec: &CommandSpec) -> Command {
+    let last = spec
+        .name
+        .rsplit(' ')
+        .next()
+        .unwrap_or(&spec.name)
+        .to_owned();
+    let mut sub = Command::new(last).about(spec.about.clone());
+    for arg in &spec.args {
+        let base = Arg::new(arg.name.clone()).help(arg.help.clone());
+        sub = sub.arg(match &arg.kind {
+            ArgKind::Positional => base,
+            ArgKind::Rest => base.num_args(1..).action(ArgAction::Append),
+            ArgKind::Flag => base.long(arg.name.clone()).action(ArgAction::SetTrue),
+            ArgKind::Option { values, default } => {
+                let mut a = base.long(arg.name.clone()).value_name("值");
+                if !values.is_empty() {
+                    a = a.value_parser(PossibleValuesParser::new(values.clone()));
+                }
+                if let Some(default) = default {
+                    a = a.default_value(default.clone());
+                }
+                a
+            }
+        });
+    }
+    sub
+}
+
+/// 命令名里的空格表示分组：`dida ls` 是 `dida` 下面的 `ls`。分组可以有多层。
+#[derive(Default)]
+struct Group<'a> {
+    leaves: Vec<&'a CommandSpec>,
+    groups: BTreeMap<String, Group<'a>>,
+}
+
+impl<'a> Group<'a> {
+    fn insert(&mut self, words: &[&str], spec: &'a CommandSpec) {
+        match words {
+            [] | [_] => self.leaves.push(spec),
+            [first, rest @ ..] => self
+                .groups
+                .entry((*first).to_owned())
+                .or_default()
+                .insert(rest, spec),
+        }
+    }
+
+    fn attach(self, mut cmd: Command) -> Command {
+        for spec in self.leaves {
+            cmd = cmd.subcommand(leaf(spec));
+        }
+        for (name, group) in self.groups {
+            let sub = Command::new(name.clone())
+                .about(format!("{name} 的子命令"))
+                .subcommand_required(true)
+                .arg_required_else_help(true);
+            cmd = cmd.subcommand(group.attach(sub));
+        }
+        cmd
+    }
+}
+
+/// 一个名字不能既是命令又是分组（`dida` 和 `dida ls` 不能同时有）。
+fn check_groups(specs: &[CommandSpec]) -> Result<(), AppError> {
+    for spec in specs {
+        let prefix = format!("{} ", spec.name);
+        if let Some(child) = specs.iter().find(|s| s.name.starts_with(&prefix)) {
+            return Err(AppError::config(format!(
+                "`{}` 既是一个子命令，又是 `{}` 的分组",
+                spec.name, child.name
+            )));
+        }
+        if spec.name.split(' ').any(str::is_empty) {
+            return Err(AppError::config(format!(
+                "子命令名 `{}` 里有多余的空格",
+                spec.name
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn build(program: &str, specs: &[CommandSpec]) -> Command {
-    let mut root = Command::new(program.to_owned())
+    let root = Command::new(program.to_owned())
         .subcommand_required(true)
         .arg_required_else_help(true)
         .disable_help_subcommand(true)
         .args(global_args());
+    let mut tree = Group::default();
     for spec in specs {
-        let mut sub = Command::new(spec.name.clone()).about(spec.about.clone());
-        for arg in &spec.args {
-            let base = Arg::new(arg.name.clone()).help(arg.help.clone());
-            sub = sub.arg(match &arg.kind {
-                ArgKind::Positional => base,
-                ArgKind::Rest => base.num_args(1..).action(ArgAction::Append),
-                ArgKind::Flag => base.long(arg.name.clone()).action(ArgAction::SetTrue),
-                ArgKind::Option { values, default } => {
-                    let mut a = base.long(arg.name.clone()).value_name("值");
-                    if !values.is_empty() {
-                        a = a.value_parser(PossibleValuesParser::new(values.clone()));
-                    }
-                    if let Some(default) = default {
-                        a = a.default_value(default.clone());
-                    }
-                    a
-                }
-            });
-        }
-        root = root.subcommand(sub);
+        let words: Vec<&str> = spec.name.split(' ').collect();
+        tree.insert(&words, spec);
     }
-    root
+    tree.attach(root)
+}
+
+/// 从解析结果里一层层找到叶子：返回完整的命令名和叶子的参数。
+fn matched(matches: &clap::ArgMatches) -> Option<(String, &clap::ArgMatches)> {
+    let (first, mut sub) = matches.subcommand()?;
+    let mut path = vec![first];
+    while let Some((name, next)) = sub.subcommand() {
+        path.push(name);
+        sub = next;
+    }
+    Some((path.join(" "), sub))
 }
 
 fn format_of(json: bool, text: bool, color: &str, env: Env) -> Format {
@@ -200,6 +278,7 @@ impl Service {
             }
         }
         specs.sort_by(|a, b| a.name.cmp(&b.name));
+        check_groups(&specs)?;
 
         let matches = match build(&program, &specs).try_get_matches_from(&argv) {
             Ok(matches) => matches,
@@ -220,9 +299,10 @@ impl Service {
                 });
             }
         };
-        let Some((name, sub)) = matches.subcommand() else {
+        let Some((name, sub)) = matched(&matches) else {
             return Err(AppError::config("clap 没有给出子命令"));
         };
+        let name = name.as_str();
         let (Some(spec), Some(owner)) = (specs.iter().find(|s| s.name == name), owners.get(name))
         else {
             return Err(AppError::config(format!("子命令 `{name}` 没有登记者")));

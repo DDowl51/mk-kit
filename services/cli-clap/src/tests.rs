@@ -402,3 +402,123 @@ async fn an_argument_named_like_a_global_option_is_a_config_error_not_a_crash() 
     assert_eq!(err.kind, ErrorKind::Config);
     assert!(err.message.contains("`text`"), "{}", err.message);
 }
+
+/// 登记一组名字，`run` 把命令名和参数打出来。
+struct Named(Vec<&'static str>);
+
+#[async_trait]
+impl CommandProvider for Named {
+    async fn commands(&self) -> Result<Vec<CommandSpec>, AppError> {
+        Ok(self
+            .0
+            .iter()
+            .map(|n| CommandSpec {
+                name: (*n).to_owned(),
+                about: format!("{n} 的说明"),
+                args: vec![arg("id", ArgKind::Positional), arg("all", ArgKind::Flag)],
+            })
+            .collect())
+    }
+
+    async fn run(&self, inv: Invocation) -> Result<Output, AppError> {
+        Ok(Output {
+            text: format!("{} {:?} {:?}", inv.command, inv.args, inv.format),
+        })
+    }
+}
+
+struct NamedContributor(Vec<&'static str>);
+
+impl Component for NamedContributor {
+    fn manifest(&self) -> Manifest {
+        Manifest {
+            id: "named",
+            kind: Kind::Feature,
+            summary: "测试用",
+            provides: vec![],
+            requires: vec![CLI_COMMANDS.id()],
+            optional_requires: vec![],
+        }
+    }
+
+    fn start(&self, _: &ConfigSection, host: &mut Host<'_>) -> Result<(), AppError> {
+        host.contribute(&CLI_COMMANDS, Arc::new(Named(self.0.clone())))
+    }
+}
+
+async fn run_named(names: Vec<&'static str>, args: &[&str]) -> Result<Outcome, AppError> {
+    let capture = Capture {
+        env: PIPE,
+        written: Arc::default(),
+    };
+    let app = testkit::app()
+        .with(capture.clone())
+        .with(NamedContributor(names))
+        .boot()
+        .await
+        .unwrap();
+    let argv = std::iter::once("stash")
+        .chain(args.iter().copied())
+        .map(str::to_owned)
+        .collect();
+    app.resolve(&CLI).unwrap().run(argv).await?;
+    Ok(capture.written.lock().unwrap()[0].clone())
+}
+
+#[tokio::test]
+async fn spaces_in_names_make_groups() {
+    let names = vec!["add", "dida ls", "dida done", "dida push"];
+    let out = run_named(names.clone(), &["dida", "ls", "x1", "--all", "--text"])
+        .await
+        .unwrap();
+    assert_eq!(out.code, 0, "{}", out.stderr);
+    assert!(
+        out.stdout
+            .starts_with("dida ls {\"all\": \"true\", \"id\": \"x1\"} Text"),
+        "全局选项在分组下面照样能用：{}",
+        out.stdout
+    );
+    let top = run_named(names.clone(), &["add"]).await.unwrap();
+    assert!(top.stdout.starts_with("add "), "{}", top.stdout);
+
+    let help = run_named(names.clone(), &["--help"]).await.unwrap();
+    assert!(
+        help.stdout.contains("dida") && help.stdout.contains("add"),
+        "{}",
+        help.stdout
+    );
+    assert!(
+        !help.stdout.contains("dida ls"),
+        "顶层只列分组名：{}",
+        help.stdout
+    );
+    let group_help = run_named(names.clone(), &["dida", "--help"]).await.unwrap();
+    for sub in ["ls", "done", "push"] {
+        assert!(group_help.stdout.contains(sub), "{}", group_help.stdout);
+    }
+    let bare = run_named(names, &["dida"]).await.unwrap();
+    assert_eq!(bare.code, EXIT_USAGE, "只写分组名是用法不对");
+}
+
+#[tokio::test]
+async fn deeper_groups_work_too() {
+    let out = run_named(vec!["a b c"], &["a", "b", "c", "7"])
+        .await
+        .unwrap();
+    assert!(
+        out.stdout.starts_with("a b c {\"id\": \"7\"}"),
+        "{}",
+        out.stdout
+    );
+}
+
+#[tokio::test]
+async fn a_name_cannot_be_both_a_command_and_a_group() {
+    let err = run_named(vec!["dida", "dida ls"], &["dida"])
+        .await
+        .unwrap_err();
+    assert_eq!(err.kind, ErrorKind::Config);
+    assert!(err.message.contains("分组"), "{}", err.message);
+    let spaces = run_named(vec!["dida  ls"], &["dida"]).await.unwrap_err();
+    assert_eq!(spaces.kind, ErrorKind::Config);
+}

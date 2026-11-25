@@ -12,7 +12,9 @@ use serde::{Deserialize, Serialize};
 /// 一个子命令的描述。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommandSpec {
-    /// 子命令的名字，例如 `day`。
+    /// 子命令的名字，例如 `day`。空格表示分组：`dida ls` 是 `dida` 下面的 `ls`
+    /// （用户敲 `程序 dida ls`；`Invocation::command` 里也是 `dida ls`）。
+    /// 一个名字不能既是子命令又是分组。
     pub name: String,
     /// 一句话说明，出现在帮助里。
     pub about: String,

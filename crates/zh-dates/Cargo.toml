@@ -1,0 +1,14 @@
+[package]
+name = "zh-dates"
+description = "纯逻辑库：中文（和几个英文）的日期写法 → 日期：明天、周五、下周一、+3、11-20、12月1日……"
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+kernel-api.workspace = true
+jiff.workspace = true
+
+[lints]
+workspace = true
